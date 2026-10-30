@@ -35,24 +35,26 @@ Nothing else was checked.
 - Named (persisted) keys: ECDSA P-256 only.
 - Not split into upstream-style commits.
 
-## Prebuilt DLLs (Releases)
+## Prebuilt Wine
 
-Patched DLLs are published in [Releases]([https://github.com/ZzEdovec/wine/releases]): `ncrypt.dll`, `crypt32.dll`. **64-bit only**: I haven't built 32-bit versions.
+[Releases]([https://github.com/ZzEdovec/wine/releases]) contain a complete patched Wine build, not standalone DLLs. Dropping the DLLs into an existing prefix did not work in my tests, so use the full build.
 
-You can use them in a prefix of upstream Wine without building this fork. Other Wine versions may work, but I haven't tested them.
+It is [Kron4ek's Wine-Builds](https://github.com/Kron4ek/Wine-Builds) wine-staging 11.20 with the modified files replaced. Credit for the base build goes to Kron4ek. The source of the changes is this repository.
 
-1. Copy the DLLs to `$WINEPREFIX/drive_c/windows/system32/` (in a 64-bit prefix this is the 64-bit directory).
-2. Run the app with native-first overrides:
+Usage:
+
+1. Download and extract the archive.
+2. Run apps with the bundled binary, for example:
 
    ```
-   WINEDLLOVERRIDES="ncrypt,crypt32=n,b" wine app.exe
+   WINEPREFIX=~/.wine-ncrypt ./bin/wine app.exe
    ```
 
-   or set them permanently with `winecfg` → Libraries.
+3. Use a separate prefix, or back up your existing one first.
 
-**Limitation:** 32-bit applications use the 32-bit DLLs (`syswow64/` in a 64-bit prefix, or `system32/` in a 32-bit prefix) and will not benefit from these files. If you need the fix for a 32-bit app, build the fork with 32-bit support.
+**Limitations**
 
-To revert, delete the copied DLLs, remove the overrides, or run `wineboot -u` to restore the builtin ones.
+- Only the 64-bit DLLs were replaced. 32-bit applications still use the unpatched 32-bit ones from the base build.
 
 Alternatively, build the whole fork the usual way (see the original Wine documentation below).
 
