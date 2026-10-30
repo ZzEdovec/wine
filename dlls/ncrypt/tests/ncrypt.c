@@ -873,10 +873,18 @@ static void test_NCryptExportKey(void)
 static void test_NCryptImportKey(void)
 {
     NCRYPT_PROV_HANDLE prov;
-    NCRYPT_KEY_HANDLE key, key2;
+    NCRYPT_KEY_HANDLE key, key2, key3;
     SECURITY_STATUS ret;
     DWORD size;
     BYTE buffer[256];
+    WCHAR imported_name[] = L"wine-ncrypt-import-test";
+    WCHAR curve_name[] = L"nistP256";
+    NCryptBuffer import_buffers[] =
+    {
+        { sizeof(imported_name), NCRYPTBUFFER_PKCS_KEY_NAME, imported_name },
+        { sizeof(curve_name), NCRYPTBUFFER_ECC_CURVE_NAME, curve_name },
+    };
+    NCryptBufferDesc import_params = { NCRYPTBUFFER_VERSION, ARRAY_SIZE(import_buffers), import_buffers };
 
     ret = NCryptOpenStorageProvider(&prov, NULL, 0);
     ok(!ret, "got %#lx\n", ret);
@@ -890,12 +898,106 @@ static void test_NCryptImportKey(void)
     ok(!ret, "got %#lx\n", ret);
     ok(size == 72, "got %lu\n", size);
 
-    ret = NCryptImportKey(prov, 0, BCRYPT_ECCPUBLIC_BLOB, NULL, &key2, buffer, size, 0);
+    ((BCRYPT_ECCKEY_BLOB *)buffer)->dwMagic = BCRYPT_ECDSA_PUBLIC_GENERIC_MAGIC;
+    ret = NCryptImportKey(prov, 0, BCRYPT_ECCPUBLIC_BLOB, &import_params, &key2, buffer, size, 0);
     ok(!ret, "got %#lx\n", ret);
+    ret = NCryptGetProperty(key2, NCRYPT_NAME_PROPERTY, (BYTE *)imported_name, sizeof(imported_name), &size, 0);
+    ok(!ret, "got %#lx\n", ret);
+    NCryptFreeObject(key2);
+
+    ret = NCryptExportKey(key, 0, BCRYPT_ECCPRIVATE_BLOB, NULL, buffer, sizeof(buffer), &size, 0);
+    ok(!ret, "got %#lx\n", ret);
+    ((BCRYPT_ECCKEY_BLOB *)buffer)->dwMagic = BCRYPT_ECDSA_PRIVATE_GENERIC_MAGIC;
+    ret = NCryptImportKey(prov, 0, BCRYPT_ECCPRIVATE_BLOB, &import_params, &key2, buffer, size, 0);
+    ok(!ret, "got %#lx\n", ret);
+    ret = NCryptOpenKey(prov, &key3, imported_name, 0, 0);
+    ok(!ret, "imported private key was not persisted: %#lx\n", ret);
 
     NCryptDeleteKey(key, 0);
     NCryptDeleteKey(key2, 0);
+    NCryptFreeObject(key3);
     NCryptFreeObject(prov);
+}
+
+static void test_persisted_ecdsa_key(void)
+{
+    static const WCHAR name[] = L"wine-ncrypt-persisted-ecdsa-test";
+    static const BYTE hash[] = { 1, 2, 3, 4 };
+    NCRYPT_PROV_HANDLE provider;
+    NCRYPT_KEY_HANDLE key, opened, public_key;
+    SECURITY_STATUS status;
+    BYTE public_blob[128], signature[128];
+    DWORD public_size, signature_size;
+
+    status = NCryptOpenStorageProvider(&provider, NULL, 0);
+    ok(!status, "got %#lx\n", status);
+    status = NCryptOpenKey(provider, &opened, name, 0, 0);
+    ok(status == NTE_BAD_KEYSET, "got %#lx\n", status);
+    status = NCryptCreatePersistedKey(provider, &key, BCRYPT_ECDSA_P256_ALGORITHM, name, 0, 0);
+    ok(!status, "got %#lx\n", status);
+    status = NCryptFinalizeKey(key, 0);
+    ok(!status, "got %#lx\n", status);
+    status = NCryptCreatePersistedKey(provider, &opened, BCRYPT_ECDSA_P256_ALGORITHM, name, 0, 0);
+    ok(status == NTE_EXISTS, "got %#lx\n", status);
+    status = NCryptExportKey(key, 0, BCRYPT_ECCPUBLIC_BLOB, NULL, public_blob, sizeof(public_blob), &public_size, 0);
+    ok(!status, "got %#lx\n", status);
+    status = NCryptFreeObject(key);
+    ok(!status, "got %#lx\n", status);
+
+    status = NCryptOpenKey(provider, &opened, name, 0, 0);
+    ok(!status, "got %#lx\n", status);
+    status = NCryptSignHash(opened, NULL, (BYTE *)hash, sizeof(hash), signature, sizeof(signature), &signature_size, 0);
+    ok(!status, "got %#lx\n", status);
+    status = NCryptImportKey(provider, 0, BCRYPT_ECCPUBLIC_BLOB, NULL, &public_key, public_blob, public_size, 0);
+    ok(!status, "got %#lx\n", status);
+    status = NCryptVerifySignature(public_key, NULL, (BYTE *)hash, sizeof(hash), signature, signature_size, 0);
+    ok(!status, "got %#lx\n", status);
+    signature[0] ^= 1;
+    status = NCryptVerifySignature(public_key, NULL, (BYTE *)hash, sizeof(hash), signature, signature_size, 0);
+    ok(status == NTE_BAD_SIGNATURE, "got %#lx\n", status);
+
+    NCryptFreeObject(opened);
+    status = NCryptCreatePersistedKey(provider, &key, BCRYPT_ECDSA_P256_ALGORITHM, name, 0,
+                                     NCRYPT_OVERWRITE_KEY_FLAG);
+    ok(!status, "got %#lx\n", status);
+    status = NCryptFinalizeKey(key, 0);
+    ok(!status, "got %#lx\n", status);
+    NCryptFreeObject(key);
+    status = NCryptOpenKey(provider, &opened, name, 0, 0);
+    ok(!status, "got %#lx\n", status);
+    NCryptDeleteKey(opened, 0);
+    status = NCryptOpenKey(provider, &opened, name, 0, 0);
+    ok(status == NTE_BAD_KEYSET, "got %#lx\n", status);
+    NCryptDeleteKey(public_key, 0);
+    NCryptFreeObject(provider);
+}
+
+static void test_named_unsupported_persistent_algorithms(void)
+{
+    static const WCHAR rsa_name[] = L"wine-ncrypt-named-rsa-test";
+    static const WCHAR p384_name[] = L"wine-ncrypt-named-p384-test";
+    static const WCHAR p521_name[] = L"wine-ncrypt-named-p521-test";
+    static const WCHAR *names[] = { rsa_name, p384_name, p521_name };
+    static const WCHAR *algorithms[] = { BCRYPT_RSA_ALGORITHM, BCRYPT_ECDSA_P384_ALGORITHM,
+                                         BCRYPT_ECDSA_P521_ALGORITHM };
+    NCRYPT_PROV_HANDLE provider;
+    NCRYPT_KEY_HANDLE key;
+    SECURITY_STATUS status;
+    unsigned int i;
+
+    status = NCryptOpenStorageProvider(&provider, NULL, 0);
+    ok(!status, "got %#lx\n", status);
+    for (i = 0; i < ARRAY_SIZE(names); i++)
+    {
+        status = NCryptCreatePersistedKey(provider, &key, algorithms[i], names[i], 0, NCRYPT_OVERWRITE_KEY_FLAG);
+        ok(!status, "algorithm %u: got %#lx\n", i, status);
+        if (status) continue;
+        status = NCryptFinalizeKey(key, 0);
+        ok(!status, "algorithm %u finalize: got %#lx\n", i, status);
+        status = NCryptDeleteKey(key, 0);
+        ok(!status, "algorithm %u free: got %#lx\n", i, status);
+    }
+    NCryptFreeObject(provider);
 }
 
 START_TEST(ncrypt)
@@ -912,4 +1014,6 @@ START_TEST(ncrypt)
     test_NCryptDecrypt();
     test_NCryptExportKey();
     test_NCryptImportKey();
+    test_persisted_ecdsa_key();
+    test_named_unsupported_persistent_algorithms();
 }

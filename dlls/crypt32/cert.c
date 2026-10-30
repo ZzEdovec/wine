@@ -2759,6 +2759,11 @@ static BOOL CNG_ImportECCPubKey(CERT_PUBLIC_KEY_INFO *pubKeyInfo, BCRYPT_KEY_HAN
         alg_handle = BCRYPT_ECDSA_P384_ALG_HANDLE;
         blob_magic = BCRYPT_ECDSA_PUBLIC_P384_MAGIC;
     }
+    else if (!strcmp(*ecc_curve, szOID_ECC_CURVE_P521))
+    {
+        alg_handle = BCRYPT_ECDSA_P521_ALG_HANDLE;
+        blob_magic = BCRYPT_ECDSA_PUBLIC_P521_MAGIC;
+    }
     else
     {
         FIXME("Unsupported ecc curve type: %s\n", *ecc_curve);

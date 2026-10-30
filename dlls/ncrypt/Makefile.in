@@ -1,6 +1,6 @@
 IMPORTLIB = ncrypt
 MODULE    = ncrypt.dll
-IMPORTS   = bcrypt
+IMPORTS   = advapi32 bcrypt
 
 SOURCES = \
 	main.c

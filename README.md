@@ -1,3 +1,63 @@
+# Wine fork: ncrypt ECC import + persistent keys (experimental)
+
+## Why
+
+Some apps that verify signatures (e.g. of downloaded manifests or updates) fail under Wine. Others need persistent key storage, which Wine did not implement.
+
+- **Signature verification.** The MDD launcher fails this way in both its .NET installer and its Java launcher. In the .NET case the failure is:
+
+  ```
+  CryptographicException: Unknown error (0x80090029)   // NTE_NOT_SUPPORTED
+    ... ECDsaCng.ImportSubjectPublicKeyInfo -> CngKey.Import -> NCryptImportKey
+  ```
+
+  Wine's `NCryptImportKey` rejected any parameter list, but callers pass the ECC curve name (`NCRYPTBUFFER_ECC_CURVE_NAME`) there.
+- **Persistent keys.** Epic Games Launcher needs named keys that survive between runs (`NCryptCreatePersistedKey` / `NCryptOpenKey`).
+
+## Changes
+
+- **ncrypt:** `NCryptImportKey` parses parameters (P-256/384/521 curve names, `PKCS_KEY_NAME`) and handles generic ECDSA magic.
+- **ncrypt:** persistent ECDSA P-256 keys (`NCryptCreatePersistedKey`, `NCryptOpenKey`, `NCryptDeleteKey`), stored in the prefix registry.
+- **crypt32:** P-521 curve and `ecdsa-with-SHA512` OID for certificate signature verification.
+- Tests added for ncrypt and crypt32.
+
+## Tested with
+
+- MDD installer (.NET 10) and MDD launcher (Java): signature check now passes.
+- Epic Games Launcher: no longer requires logging into your account every time you restart it.
+
+Nothing else was checked.
+
+## Known limitations
+
+- A full `crypt32_test.exe cert` run fails. I haven't figured out the reason yet. 
+- Persisted private keys are stored **unencrypted** in the registry.
+- Named (persisted) keys: ECDSA P-256 only.
+- Not split into upstream-style commits.
+
+## Prebuilt DLLs (Releases)
+
+Patched DLLs are published in [Releases]([https://github.com/ZzEdovec/wine/releases]): `ncrypt.dll`, `crypt32.dll`. **64-bit only**: I haven't built 32-bit versions.
+
+You can use them in a prefix of upstream Wine without building this fork. Other Wine versions may work, but I haven't tested them.
+
+1. Copy the DLLs to `$WINEPREFIX/drive_c/windows/system32/` (in a 64-bit prefix this is the 64-bit directory).
+2. Run the app with native-first overrides:
+
+   ```
+   WINEDLLOVERRIDES="ncrypt,crypt32=n,b" wine app.exe
+   ```
+
+   or set them permanently with `winecfg` → Libraries.
+
+**Limitation:** 32-bit applications use the 32-bit DLLs (`syswow64/` in a 64-bit prefix, or `system32/` in a 32-bit prefix) and will not benefit from these files. If you need the fix for a 32-bit app, build the fork with 32-bit support.
+
+To revert, delete the copied DLLs, remove the overrides, or run `wineboot -u` to restore the builtin ones.
+
+Alternatively, build the whole fork the usual way (see the original Wine documentation below).
+
+---
+
 ## INTRODUCTION
 
 Wine is a program which allows running Microsoft Windows programs
