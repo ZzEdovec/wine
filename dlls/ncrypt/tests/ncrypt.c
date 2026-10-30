@@ -930,12 +930,6 @@ static void test_NCryptImportKey(void)
     ok(!ret, "got %#lx\n", ret);
     ok(!wcscmp((const WCHAR *)buffer, L"ECDSA"), "got %s\n", wine_dbgstr_w((const WCHAR *)buffer));
 
-    size = 0;
-    memset(buffer, 0, sizeof(buffer));
-    ret = NCryptGetProperty(key2, NCRYPT_ALGORITHM_GROUP_PROPERTY, buffer, sizeof(buffer), &size, 0);
-    ok(!ret, "got %#lx\n", ret);
-    ok(!wcscmp((const WCHAR *)buffer, L"ECDSA"), "got %s\n", wine_dbgstr_w((const WCHAR *)buffer));
-
     NCryptDeleteKey(key, 0);
     NCryptDeleteKey(key2, 0);
     NCryptFreeObject(key3);
