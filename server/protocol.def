@@ -1228,6 +1228,7 @@ typedef volatile struct
     int          exit_code;    /* process exit code */
 @REPLY
     int          self;         /* suicide? */
+    int          exit_code;    /* process exit code */
 @END
 
 
@@ -4254,7 +4255,7 @@ enum inproc_sync_type
 @REQ(d3dkmt_object_create)
     unsigned int        type;           /* d3dkmt object type */
     int                 fd;             /* host specific fd */
-    unsigned int        value;          /* initial value for keyed mutex */
+    unsigned __int64    value;          /* initial value for keyed mutex */
     VARARG(runtime,bytes);              /* client runtime data */
 @REPLY
     d3dkmt_handle_t     global;         /* global d3dkmt handle */
@@ -4339,6 +4340,24 @@ enum inproc_sync_type
     unsigned __int64    fence_value;    /* semaphore fence value */
     data_size_t         runtime_size;   /* size of client runtime data */
     VARARG(runtime,bytes);              /* client runtime data */
+@END
+
+
+/* Wait on a global d3dkmt sync fence value */
+@REQ(d3dkmt_sync_wait)
+    d3dkmt_handle_t     sync;           /* sync global handle */
+    unsigned int        fence_value;    /* fence value to wait for */
+    obj_handle_t        wait_handle;    /* previously returned wait handle */
+    unsigned int        wait_status;    /* status returned from previous wait */
+@REPLY
+    obj_handle_t        wait_handle;    /* wait handle for pending acquire */
+@END
+
+
+/* Signal a global d3dkmt sync fence value */
+@REQ(d3dkmt_sync_signal)
+    d3dkmt_handle_t     sync;           /* sync global handle */
+    unsigned __int64    fence_value;    /* signaled fence value */
 @END
 
 

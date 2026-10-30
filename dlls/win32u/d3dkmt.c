@@ -1929,8 +1929,22 @@ NTSTATUS WINAPI NtGdiDdDDIDestroySynchronizationObject( const D3DKMT_DESTROYSYNC
  */
 NTSTATUS WINAPI NtGdiDdDDISignalSynchronizationObjectFromCpu( const D3DKMT_SIGNALSYNCHRONIZATIONOBJECTFROMCPU *params )
 {
-    FIXME( "params %p stub!\n", params );
-    return STATUS_NOT_IMPLEMENTED;
+    struct d3dkmt_sync *sync;
+    NTSTATUS status;
+
+    if (params->ObjectCount != 1) FIXME( "Not implemented\n" );
+
+    if (!(sync = get_d3dkmt_sync( params->ObjectHandleArray[0] ))) return STATUS_INVALID_PARAMETER;
+
+    SERVER_START_REQ( d3dkmt_sync_signal )
+    {
+        req->sync = sync->obj.global;
+        req->fence_value = params->FenceValueArray[0];
+        status = wine_server_call( req );
+    }
+    SERVER_END_REQ;
+
+    return status;
 }
 
 /******************************************************************************
@@ -1938,8 +1952,35 @@ NTSTATUS WINAPI NtGdiDdDDISignalSynchronizationObjectFromCpu( const D3DKMT_SIGNA
  */
 NTSTATUS WINAPI NtGdiDdDDIWaitForSynchronizationObjectFromCpu( const D3DKMT_WAITFORSYNCHRONIZATIONOBJECTFROMCPU *params )
 {
-    FIXME( "params %p stub!\n", params );
-    return STATUS_NOT_IMPLEMENTED;
+    NTSTATUS status = STATUS_SUCCESS;
+    HANDLE wait_handle = NULL;
+    struct d3dkmt_sync *sync;
+
+    TRACE( "params %p\n", params );
+
+    if (params->ObjectCount != 1) FIXME( "Not implemented\n" );
+
+    if (!(sync = get_d3dkmt_sync( params->ObjectHandleArray[0] ))) return STATUS_INVALID_PARAMETER;
+
+    do
+    {
+        if (wait_handle) status = NtWaitForSingleObject( wait_handle, FALSE, NULL );
+        SERVER_START_REQ( d3dkmt_sync_wait )
+        {
+            req->sync = sync->obj.global;
+            req->fence_value = params->FenceValueArray[0];
+            req->wait_handle = wine_server_obj_handle( wait_handle );
+            req->wait_status = status;
+
+            status = wine_server_call( req );
+            /* server never creates a new handle if one is provided, and always returns a handle if pending */
+            if (reply->wait_handle) wait_handle = wine_server_ptr_handle( reply->wait_handle );
+            else if (wait_handle) NtClose( wait_handle );
+        }
+        SERVER_END_REQ;
+    } while (status == STATUS_PENDING);
+
+    return status;
 }
 
 static void get_resource_global_keyed_mutex( struct d3dkmt_dxgi_desc *desc, D3DKMT_HANDLE *mutex_global, D3DKMT_HANDLE *sync_global )
@@ -2156,7 +2197,13 @@ NTSTATUS d3dkmt_swapchain_create_remote( HWND hwnd, SIZE *size, D3DKMT_HANDLE *l
     if (!(toplevel = NtUserGetAncestor( hwnd, GA_ROOT ))) return STATUS_GRAPHICS_PRESENT_INVALID_WINDOW;
     if (is_current_process_window( hwnd ) && is_current_process_window( toplevel )) return STATUS_NOT_IMPLEMENTED;
     if (!get_client_rect( hwnd, &rect, get_dpi_for_window( hwnd ) )) return STATUS_GRAPHICS_PRESENT_INVALID_WINDOW;
-    if (!(global = send_message( toplevel, WM_WINE_SWAPCHAIN_CREATE, (WPARAM)hwnd, 0 ))) return STATUS_GRAPHICS_PRESENT_INVALID_WINDOW;
+
+    /* FIXME: Sending a message isn't ideal as some window may not be actively processing messages. Use a timeout to workaround
+     * this issue and retry creating the swapchain next time, if it fails. This will require another kind of IPC to create the
+     * swapchain in the remote process which we currently don't have.
+     */
+    if (!(global = send_message_timeout( toplevel, WM_WINE_SWAPCHAIN_CREATE, (WPARAM)hwnd, 0, SMTO_ABORTIFHUNG, 100, FALSE )))
+        return STATUS_GRAPHICS_PRESENT_INVALID_WINDOW;
 
     return d3dkmt_swapchain_open( global, size, local );
 }
@@ -2190,6 +2237,17 @@ NTSTATUS d3dkmt_swapchain_acquire_image( D3DKMT_HANDLE local, UINT *index )
     size = get_client_swapchain_size( swapchain->desc.toplevel, swapchain->desc.hwnd );
     if (memcmp( &size, &swapchain->desc.size, sizeof(size) )) return STATUS_GRAPHICS_ALLOCATION_CONTENT_LOST;
 
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS d3dkmt_swapchain_queue_present( D3DKMT_HANDLE local, UINT index )
+{
+    struct d3dkmt_swapchain *swapchain;
+
+    TRACE( "local %#x index %#x\n", local, index );
+
+    if (!(swapchain = get_d3dkmt_swapchain( local ))) return STATUS_INVALID_PARAMETER;
+    NtUserPostMessage( swapchain->desc.toplevel, WM_WINE_SWAPCHAIN_PRESENT, swapchain->obj.global, index );
     return STATUS_SUCCESS;
 }
 
